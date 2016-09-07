@@ -1,0 +1,61 @@
+#!/bin/bash
+
+###### Dependencies ######
+##########################
+# ---- Functions
+# error_exit
+# 
+# ---- External commands
+# mysqldump
+##########################
+
+
+dump_db() {
+
+    #    ----------------------------------------------------------------------
+    #    Function dumps database in [./$db_name | $db_path/$db_name | $db_file]
+    #    ----------------------------------------------------------------------
+    #    @param
+    #    $1=db_name
+    #    $2=db_user
+    #    $3=db_pass
+    #    $4=db_path or db_file ( optional )
+    #    ======================================================================
+    #    @usage
+    #    # dumps db in $PWD/$db_name
+    #    dump_db $db_name $db_user $db_pass
+    #    
+    #    # dumps db in $db_path/$db_name
+    #    dump_db $db_name $db_user $db_pass $db_path
+    #    # dumps db in $db_file
+    #    dump_db $db_name $db_user $db_pass $db_file
+    #    ----------------------------------------------------------------------
+
+    local db_name="$1"
+    local db_user="$2"
+    local db_pass="$3"
+    local db_path="$4"
+    local db_file=""
+
+    if [[ -z "$db_name" ]]; then
+        error_exit "$LINENO: Error: database name is not provided!"
+    fi
+    if [[ -z "$db_user" ]]; then
+        error_exit "$LINENO: Error: database user name is not provided!"    
+    fi
+
+    if [[ -z "$db_path" ]]; then
+        db_file="$PWD/db_name.sql"
+    elif [[ -d $"db_path" ]]; then
+        db_file="$db_path/db_name.sql"
+    else
+        db_file="$db_path"
+    fi
+
+    # The option --skip-extended-insert makes sure each insert is in its own line, so easier to version control
+    mysqldump -u "$db_user" -p"$db_pass" --skip-extended-insert --default-character-set=utf8 "$db_name" > "$db_file"
+
+    if [[ $? -ne 0 ]]; then
+        error_exit "$LINENO: Error dumping database, [DB=$db_name] [User=$db_user] [file=$db_file]!"
+    fi
+}

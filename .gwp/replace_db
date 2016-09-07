@@ -1,0 +1,54 @@
+#!/bin/bash
+
+###### Dependencies ######
+##########################
+# ---- Functions
+# error_exit
+# warn
+# 
+# ---- External commands
+# mysql
+##########################
+
+
+replace_db() {
+
+    #   ----------------------------------------------------------------------
+    #   Function replaces database $db_name using dump file $db_file
+    #   ======================================================================
+    #   @param
+    #   $1=db_name
+    #   $2=db_user
+    #   $3=db_pass
+    #   $4=db_file
+    #   ----------------------------------------------------------------------
+    #   @usage
+    #   # dumps db in $PWD/$db_name
+    #   replace_db $db_name $db_user $db_pass $db_file
+    #   ----------------------------------------------------------------------
+
+    local db_name="$1"
+    local db_user="$2"
+    local db_pass="$3"
+    local db_file="$4"
+
+    if [[ -z "$db_name" ]]; then
+        error_exit "$LINENO: Error: database name is not provided!"
+    fi
+    if [[ -z "$db_user" ]]; then
+        error_exit "$LINENO: Error: database user name is not provided!"
+    fi
+    if [[ -z "$db_file" ]]; then
+        error_exit "$LINENO: Error: database file is not provided!"
+    fi
+    if [[ ! -f "$db_file" ]]; then
+        error_exit "$LINENO: Error: database [file=${db_file}] is not a valid file!"
+    fi
+    
+    mysql -u "$db_user" -p"$db_pass" "$db_name" < "$db_file"
+    if [[ $? -eq 0 ]]; then
+        echo "**** Database [$db_name] is replaced successfully using file: [$db_file]!"
+    else
+        warn "$LINENO: *** Error replacing database *** [DB=$db_name] [User=$db_user] [file=$db_file]!"
+    fi
+}

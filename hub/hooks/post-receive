@@ -1,0 +1,6 @@
+#!/bin/bash
+
+# ---- Adding related gwp hook
+SCRIPT_ROOT=$( cd "$(dirname "$0")"; PWD -P )
+SCRIPT_NAME=$(basename $0)
+source "${SCRIPT_ROOT}/${SCRIPT_NAME}.gwp"

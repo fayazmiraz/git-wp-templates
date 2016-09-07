@@ -1,0 +1,22 @@
+# ignore dev files
+dev/hooks/gwp.conf
+dev/hooks/gwp/*
+!dev/hooks/gwp/README.md
+!dev/hooks/gwp/dev_*
+dev/hooks/gwp.d/*
+!dev/hooks/gwp.d/conf
+
+# ignore hub files
+hub/hooks/gwp.conf
+hub/hooks/gwp/*
+!hub/hooks/gwp/README.md
+!hub/hooks/gwp/hub_*
+hub/hooks/gwp.d/*
+!hub/hooks/gwp.d/conf
+
+# ignore live files
+live/hooks/gwp.conf
+live/hooks/gwp/*
+!live/hooks/gwp/README.md
+live/hooks/gwp.d/*
+!live/hooks/gwp.d/conf

@@ -1,0 +1,28 @@
+#!/bin/bash
+
+if [[ -z "$PROG_NAME" ]]; then
+    PROG_NAME=$(basename $0)
+fi
+
+warn() {
+
+    #    ----------------------------------------------------------------
+    #    function warns error message but don't exit
+    #    ================================================================
+    #    @usage
+    #    warn [$LINENO There may be an issue!] [$PROG_NAME]
+    #   
+    #    @note $LINENO automatically prints line number in shell script
+    #    ----------------------------------------------------------------
+
+    local prog_name=$2
+    if [[ -z "$prog_name" ]]; then
+        prog_name="$PROG_NAME"
+    fi
+
+    echo " " 1>&2
+    echo "**** WARNING ****" 1>&2
+    echo "${prog_name}: ${1:-"Unknown Warning"}" 1>&2
+    echo "****" 1>&2
+    echo " " 1>&2
+}

@@ -1,0 +1,1 @@
+This directory contains internal BASH functions for Git WP Sync.

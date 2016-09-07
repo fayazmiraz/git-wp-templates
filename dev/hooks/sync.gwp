@@ -1,0 +1,156 @@
+#!/bin/bash
+
+######################################################################################
+# Commands
+# git wp-sync
+# git wps
+# 
+# Options:
+# -i = sync-in
+# -o = sync-out
+# -d = with database
+# -a = DB auto (no interactive for DB replaces, -a is pointless without -d)
+# 
+# @usage:
+# git wps             => interactively get all the options
+# git wps -i -d -a    => file + DB sync in (don't ask for DB replace, automate )
+# git wps -o -d       => file + DB sync out (ask for DB replace)
+# git wps -i -o       => file sync in & out
+# git wps -i -o -d    => same as $( git wps -i -d && git wps -o )
+#                        to replace live DB as well, you'll need to use separate
+#                        command. Cause syncing in live DB and then syncing out dev
+#                        DB doesn't make sense. By then live & dev will have same DB
+######################################################################################
+
+# ---- PATH of this file's directory
+SCRIPT_ROOT=$( cd "$(dirname "$0")"; PWD -P )
+
+# ---- include Configs & Global Variables
+source "${SCRIPT_ROOT}/gwp.conf"
+if [[ $? -ne 0 ]]; then
+    echo " " 1>&2
+    echo "$LINENO: Error in [${SCRIPT_ROOT}/gwp.conf] file! Aborting program." 1>&2
+    echo " " 1>&2
+    exit 1
+fi
+
+# ---- include necessary functions
+source "${FUNCTION_DIR}/error_exit" &&
+source "${FUNCTION_DIR}/warn" &&
+source "${FUNCTION_DIR}/response" &&
+source "${FUNCTION_DIR}/get_wp_db_config" &&
+source "${FUNCTION_DIR}/dump_db" &&
+source "${FUNCTION_DIR}/replace_db" && 
+source "${FUNCTION_DIR}/dev_sync_io"
+
+if [[ $? -ne 0 ]]; then
+    echo " " 1>&2
+    echo "$LINENO: Failed to include necessary functions! Aborting ${PROG_NAME} program." 1>&2
+    echo " " 1>&2
+    exit 1
+fi
+
+# ---- Option Defaults
+SYNC_IN="false"
+SYNC_OUT="false"
+WITH_DB="false"
+DB_AUTO="false"
+# @todo: implement uploads sync.
+# When running from within upload dir, only upload sync in / out should be
+# possible - so implement it that way
+WITH_UPLOADS="false"
+# Reset in case getopts has been used previously in the shell.
+OPTIND=1
+while getopts ":ioda" opt; do
+  case $opt in
+    i)
+        SYNC_IN="true"
+        ;;
+    o)
+        SYNC_OUT="true"
+        ;;    
+    d)
+        WITH_DB="true"
+        ;;
+    a)
+        DB_AUTO="true"
+        ;;
+    u)
+        WITH_UPLOADS="true"
+        ;;
+    \?)
+        error_exit "${LINENO} Invalid option: -${OPTARG}"
+        ;;
+  esac
+done
+
+if [[ "$SYNC_IN" == "false" && "$SYNC_OUT" == "false" ]]; then
+    echo " "
+    echo "**** Interactive Sync mode ****"
+    echo " "
+    SYNC_IN=$( response "Do you want sync in?" )
+    SYNC_OUT=$( response "Do you want sync out?" )
+
+    if [[ "$SYNC_IN" == "false" && "$SYNC_OUT" == "false" ]]; then
+        echo " "
+        echo "You must either sync in or sync out. Please select proper option & try again!"
+        echo "Nothing is done this time."
+        exit 0
+    fi
+
+    if [[ "false" == "$WITH_DB" ]]; then
+        WITH_DB=$( response "Sync Database?" )
+    fi
+    if [[ "true" == "$WITH_DB" ]]; then
+        if [[ "false" == "$DB_AUTO" ]]; then
+            DB_AUTO=$( response "Auto replace existing Database?" )
+        fi    
+    else
+        DB_AUTO="false"
+    fi
+
+    if [[ "false" == "$WITH_UPLOADS" ]]; then
+        WITH_UPLOADS=$( response "Sync Uploads?" )
+    fi
+
+fi
+
+echo " "
+echo "--------------------------------------"
+echo "You've selected the following options:"
+echo "SYNC IN: ${SYNC_IN}"
+echo "SYNC OUT: ${SYNC_OUT}"
+echo "SYNC WITH DB: ${WITH_DB}"
+if [[ "true" == "$WITH_DB" ]]; then
+    echo "DB AUTO Replace: ${DB_AUTO}"
+fi
+echo "SYNC WITH UPLOADS: ${WITH_UPLOADS}"
+echo "--------------------------------------"
+echo " "
+cnt=$( response "Continue?" )
+if [[ "false" == "$cnt" ]]; then
+    echo " "
+    echo "You choose not to continue!"
+    echo "Nothing is done this time. Program aborted."
+    exit 0
+fi
+
+# must be checked out in $ACTIVE_BRANCH branch
+if [[ "$CUR_BRANCH" != "$ACTIVE_BRANCH" ]]; then
+    error_exit "$LINENO: You can only Sync in/out from the ${CUR_REPO}/${ACTIVE_BRANCH} Branch!"
+fi
+
+if [[ "true" == "$SYNC_IN" ]]; then
+    dev_sync_io "IN" "${WITH_DB}" "${WITH_UPLOADS}" "${DB_AUTO}"
+fi
+
+if [[ "true" == "$SYNC_OUT" ]]; then
+    if [[ "true" == "$SYNC_IN" && "true" == "$WITH_DB" ]]; then
+        # for SYNC IN+OUT, only replace DB in DEV. Doing both is redundant.
+        WITH_DB="false"
+        DB_AUTO="false"
+    fi
+    dev_sync_io "OUT" "${WITH_DB}" "${WITH_UPLOADS}" "${DB_AUTO}"
+fi
+
+exit 0

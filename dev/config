@@ -1,0 +1,12 @@
+[alias]
+    # git sync-gwp command
+    sync-gwp = "!f() { GIT_ROOT=$(git rev-parse --show-toplevel) && "$GIT_ROOT/.git/hooks/sync.gwp" "$@"; }; f"
+    # sync-gwp alias
+    gwp = "!f() { GIT_ROOT=$(git rev-parse --show-toplevel) && "$GIT_ROOT/.git/hooks/sync.gwp" "$@"; }; f"
+    # update git hooks from template
+	gwp-update = "!f() { tpl=$(git config --path --get init.templateDir); if [ ! -f "$tpl/../update.sh" ]; then echo "Please set init.templateDir, use command like:"; echo "git config init.templateDir PATH_TO_Git_WP_Template"; else "$tpl/../update.sh" "$@"; fi }; f"
+    # gwp-update alias
+    gwpu = "!f() { tpl=$(git config --path --get init.templateDir); if [ ! -f "$tpl/../update.sh" ]; then echo "Please set init.templateDir, use command like:"; echo "git config init.templateDir PATH_TO_Git_WP_Template"; else "$tpl/../update.sh" "$@"; fi }; f"
+
+[gitWPTemplate]
+    name = dev

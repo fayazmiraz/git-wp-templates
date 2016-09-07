@@ -1,0 +1,226 @@
+#!/bin/bash
+
+###### Dependencies ######
+##########################
+# ---- Global Variables
+# DB_NAME
+# WP_DB_USER
+# WP_DB_PASS
+# WP_CONFIG
+# 
+# CUR_TIME
+# 
+# CUR_REPO
+# HUB_REPO
+# LIVE_REPO
+# 
+# ACTIVE_BRANCH
+# PULL_BRANCH
+# PUSH_BRANCH
+# PRE_SYNC_BRANCH
+# 
+# SYNC_LOG_PATH
+# SYNC_LOG_FILE
+# 
+# ---- External Functions
+# error_exit
+# response
+# get_wp_db_config
+# dump_db
+# replace_db
+# 
+# ---- External commands
+# git
+# 
+##########################
+
+dev_sync_io() {
+
+    #   ----------------------------------------------------------------
+    #   Function syncs in  updates from LIVE to DEV  repo
+    #        and syncs out updates from DEV  to LIVE repo
+    #   ================================================================
+    #   @usage:
+    #   dev_sync_io "$io" "${WITH_DB}" "${WITH_UPLOADS}" "${DB_AUTO}"
+    # 
+    #   SYNC commit message format:
+    #   --------------------------------------------------------------------
+    #   SYNC IN cycle
+    #   [GWP] PRE SYNC|IN|+/-DB|+/-UPLOADS @TIME XXXX-XX-XX XX:XX GMT (dev)
+    #   [GWP] <<< SYNC|IN|+/-DB|+/-UPLOADS @TIME XXXX-XX-XX XX:XX GMT (live)
+    #   [GWP] >>> SYNC|IN|+/-DB|+/-UPLOADS @TIME XXXX-XX-XX XX:XX GMT (dev)     -> if there is a merge
+    #   
+    #   SYNC OUT cycle
+    #   [GWP] <<< SYNC|OUT|+/-DB|+/-UPLOADS @TIME XXXX-XX-XX XX:XX GMT (dev)
+    #   [GWP] PRE SYNC|OUT|+/-DB|+/-UPLOADS @TIME XXXX-XX-XX XX:XX GMT (live)
+    #   [GWP] >>> SYNC|OUT|+/-DB|+/-UPLOADS @TIME XXXX-XX-XX XX:XX GMT (live)   -> if there is a merge
+    #   [GWP] === SYNC|OUT|+/-DB|+/-UPLOADS @TIME XXXX-XX-XX XX:XX GMT (dev)    -> if there is a merge
+    # 
+    #   SIGN Defn:
+    #   <<< SYNC ... (dev)  = going out of dev
+    #   >>> SYNC ... (live) = coming into live
+    #   === SYNC ... (dev)  = balancing the final changes (only in dev)
+    #   
+    #   Commit message extration method:
+    #   IFS=' |'
+    #   read -r sign sync_kw io db up time_repo <<< "$COMMIT_MESSAGE"
+    #   --------------------------------------------------------------------
+
+
+    # IN or OUT
+    local io=$1
+    local with_db=$2
+    local with_uploads=$3
+    local db_auto=$4
+    # signs
+    local sign_gwp="[GWP]"
+    local sign_pre="PRE"
+    local sign_in=">>>"
+    local sign_out="<<<"
+    local sign_io="==="
+    local sync_kw="SYNC"
+    # options
+    local db="DB"
+    local up="UPLOADS"
+
+     # msg common
+    local msg="$sync_kw|$io"
+    # msg specific case
+    local msg_add="$sign_gwp"
+    local msg_pull="$sign_gwp"
+    
+
+    if [[ "IN" == "$io" ]]; then
+        msg_add="$msg_add $sign_pre"
+        msg_pull="$msg_pull $sign_in"
+    elif [[ "OUT" == "$io" ]]; then
+        msg_add="$msg_add $sign_out"
+        msg_pull="$msg_pull $sign_io"
+    else
+        error_exit "$LINENO: Unknown io: [$io]"
+    fi
+
+    if [[ "true" == "$with_db" ]]; then
+        if [[ -z "$DB_NAME" || -z "$WP_DB_USER" || -z "$WP_DB_PASS" ]]; then
+            get_wp_db_config "$WP_CONFIG"
+        fi
+
+        local to_dump_db="false"
+        if [[ "false" == "$db_auto" ]]; then
+            to_dump_db=$( response "Dump [${CUR_REPO}] Database?" )
+        else
+            to_dump_db="true"
+        fi
+
+        # Option to replace DB: dev with live version in case of sync in and
+        # live with dev version in case of sync out. 
+        # Since LIVE DB replacement is done by judging commit message, this is the right
+        # place to ask that.
+        local to_replace_db="false"
+        local replace_msg="Replace ${CUR_REPO} Database with ${LIVE_REPO}?"
+        if [[ "OUT" == "$io" ]]; then
+            replace_msg="Replace ${LIVE_REPO} Database with ${CUR_REPO}?"
+        fi
+
+        if [[ "false" == "$db_auto" ]]; then
+            to_replace_db=$( response "$replace_msg" )
+        else
+            to_replace_db="true"
+        fi
+
+        if [[ "true" == "$to_dump_db" ]]; then
+            if [[ ! -d "$DB_PATH" ]]; then
+                mkdir -p "$DB_PATH"
+            fi
+            local dev_dump_file="${DB_PATH}/${CUR_REPO}.sql"
+            echo " "
+            echo "**** Dumping ${CUR_REPO} Database to [file=$dev_dump_file]"
+            dump_db "$DB_NAME" "$WP_DB_USER" "$WP_DB_PASS" "$dev_dump_file"
+        fi
+
+        if [[ "IN" == "$io" ]]; then
+            # In rare occation, we may not want to dump or replace local DB but still
+            # may want to bring in live DB to local reop, since $with_db option is set
+            # to true. So adding DB sync message anyway
+            msg="${msg}|+${db}"  
+        else
+            # in case of sync out, we only add +DB message if we want to replace live
+            # repo. Since we don't get an interactive keyboard session with the remote
+            # server hooks, we must decide it here
+            if [[ "true" == "$to_replace_db" ]]; then
+                msg="${msg}|+${db}"
+            else
+                msg="${msg}|-${db}"    
+            fi
+        fi
+    else
+        msg="${msg}|-${db}"
+    fi
+
+    if [[ "true" == "$with_uploads" ]]; then
+        # @todo: commit uploads?
+        msg="${msg}|+${up}"
+    else
+        msg="${msg}|-${up}"
+    fi
+
+    msg="${msg} ${CUR_TIME} (${CUR_REPO})"
+
+    # create sync log dir if not exists
+    if [[ ! -d "$SYNC_LOG_PATH" ]]; then
+        mkdir "$SYNC_LOG_PATH"
+        if [[ $? -ne 0 ]]; then
+            error_exit "$LINENO: Failed to create sync log dir [$SYNC_LOG_PATH]. Aborting program"
+        fi
+    fi
+
+    # Adding sync log. This is necessary in both sync in and out, because when the upstream is up-to-date,
+    # upstream update hook will not execute. Since our workflow depends on the CODE in origin's update and
+    # post-receive hook, we better make sure there is something to push, especially in case of SYNC IN
+    msg_add="$msg_add $msg"
+    echo "$msg_add" >> "${SYNC_LOG_FILE}"
+
+    # Adding everything, so that we don't accidentally pull something from the server that destroys unstaged changes
+    #   although, ideally there shouldn't be any changes in the master branch other than merge from other branches.
+    git add -A
+    if [[ $? -ne 0 ]]; then
+        # git add returns 0 even if there is nothing to add, so non-zero return means there must have been an error
+        error_exit "$LINENO: Failed to add files in ${CUR_REPO}/${ACTIVE_BRANCH}! Please check error messages and take actions accordingly."
+    fi
+
+    git commit -m "$msg_add"
+    if [[ $? -ne 0 ]]; then
+        error_exit "$LINENO: Failed to commit ${CUR_REPO}/${ACTIVE_BRANCH}! Please try manually."
+    fi
+
+    if [[ "IN" == "$io" ]]; then
+        git push $HUB_REPO $ACTIVE_BRANCH:$PRE_SYNC_BRANCH
+        if [[ $? -ne 0 ]]; then
+            error_exit "$LINENO: Failed to push ${CUR_REPO}/${ACTIVE_BRANCH} to ${HUB_REPO}/${PRE_SYNC_BRANCH}! May be there is an error or there is no update from live server. Please check error messages and take actions accordingly."
+        fi
+    else
+        git push $HUB_REPO $ACTIVE_BRANCH:$PUSH_BRANCH
+        if [[ $? -ne 0 ]]; then
+            error_exit "$LINENO: Failed to push ${CUR_REPO}/${ACTIVE_BRANCH} to ${HUB_REPO}/${PUSH_BRANCH}! Please check error messages and take actions accordingly."
+        fi
+    fi
+
+    # By this time $HUB_REPO/$PULL_BRANCH should be updated by $LIVE_REPO/$LIVE_BRANCH
+    # So now pull from $HUB_REPO/$PULL_BRANCH
+    msg_pull="$msg_pull $msg"
+    git fetch $HUB_REPO $PULL_BRANCH
+    git merge -m "$msg_pull" FETCH_HEAD
+    if [[ $? -ne 0 ]]; then 
+        error_exit "$LINENO: Failed to pull from ${HUB_REPO}/${PULL_BRANCH} to ${CUR_REPO}/${ACTIVE_BRANCH}! Please check error messages and take actions accordingly."
+    fi
+
+    if [[ "IN" == "$io" && "true" == "$to_replace_db" ]]; then
+        if [[ ! -d "$DB_PATH" ]]; then
+            mkdir -p "$DB_PATH"
+        fi
+        local live_dump_file="${DB_PATH}/${LIVE_REPO}.sql"
+        echo " "
+        echo "**** Replacing [${CUR_REPO}] Database with version from [${LIVE_REPO}] .. ."
+        replace_db "$DB_NAME" "$WP_DB_USER" "$WP_DB_PASS" "$live_dump_file"
+    fi
+}

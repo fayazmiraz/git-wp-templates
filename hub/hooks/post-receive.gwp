@@ -1,0 +1,89 @@
+#!/bin/bash
+
+# ---- PATH of this file's directory
+if [[ -z "$SCRIPT_ROOT" ]]; then
+    SCRIPT_ROOT=$( cd "$(dirname "$0")"; PWD -P )
+fi
+
+# ---- include Configs & Global Variables
+source "${SCRIPT_ROOT}/gwp.conf"
+if [[ $? -ne 0 ]]; then
+    echo " " 1>&2
+    echo "$LINENO: Error in [${SCRIPT_ROOT}/gwp.conf] file! Aborting program." 1>&2
+    echo " " 1>&2
+    exit 1
+fi
+
+# ---- include necessary functions
+source "${FUNCTION_DIR}/error_exit" &&
+source "${FUNCTION_DIR}/warn" &&
+source "${FUNCTION_DIR}/get_wp_db_config" &&
+source "${FUNCTION_DIR}/dump_db" &&
+source "${FUNCTION_DIR}/replace_db" && 
+source "${FUNCTION_DIR}/hub_sync_io"
+
+if [[ $? -ne 0 ]]; then
+    echo " " 1>&2
+    echo "$LINENO: Failed to include necessary functions! Aborting ${PROG_NAME} program." 1>&2
+    echo " " 1>&2
+    exit 1
+fi
+
+# ---- Program Logic
+while read old_sha new_sha ref_name
+do
+    COMMIT_MSG=$( git log -n 1 --pretty=format:%s "${new_sha}" )
+    gwp_sign="${COMMIT_MSG:0:5}"
+    gwp_msg="${COMMIT_MSG:6}"    
+    # extract repo name from commit message
+    gwp_repo=$(echo $gwp_msg | sed -e 's|.*(\(.*\))|\1|')
+    # msg without repo name
+    gwp_msg="${gwp_msg%(*)}"
+    TMP_IFS="$IFS"
+
+
+    IFS=' |'
+    # extracting sync message
+    read -r sign sync_kw io db up sync_time <<< "$gwp_msg"
+    WITH_DB=false
+    WITH_UPLOADS=false
+    if [[ "+DB" == "$db" ]]; then
+        WITH_DB=true
+    fi
+    if [[ "+UPLOADS" == "$up" ]]; then
+        WITH_UPLOADS=true
+    fi
+
+
+    # extract only branch name part form full $ref_name
+    REF_BRANCH_NAME=$(echo $ref_name | sed -e 's|.*/\(.*\)|\1|')
+
+    if [[ "$REF_BRANCH_NAME" == "$PULL_BRANCH" ]]; then
+        # only dev sync OUT commit messagse requires action from hub/master branch
+        # [GWP] <<< SYNC|OUT|+/-DB|+/-UPLOADS @TIME XXXX-XX-XX XX:XX GMT (dev)
+        if [[ "SYNC" == "$sync_kw" && "<<<" == "$sign" && "OUT" == "$io" ]]; then
+            hub_sync_io "$io" "${WITH_DB}" "${WITH_UPLOADS}" "${gwp_repo}"
+        fi
+    else
+        # extract pre-sync repo from branch name
+        IFS=' _'
+        read -r repo synk_suff <<< "$REF_BRANCH_NAME"
+        if [[ "$synk_suff" == "$PRE_SYNC_BRANCH_SUFFIX" ]]; then
+            # now $repo must be the repo name
+            # do nothing for live repo sync
+            # & to avoid confusion, no repo should be names as hub
+            if [[ "$LIVE_REPO" != "$repo" && "$HUB_REPO" != "$repo" ]]; then
+                #   only dev sync IN pre sync commit messagse requires action from hub/*pre-sync branchs:
+                #   [GWP] PRE SYNC|IN|+/-DB|+/-UPLOADS @TIME XXXX-XX-XX XX:XX GMT (dev)
+                if [[ "SYNC" == "$sync_kw" && "PRE" == "$sign" && "IN" == "$io" ]]; then
+                    hub_sync_io "$io" "${WITH_DB}" "${WITH_UPLOADS}" "${gwp_repo}"
+                fi
+            fi
+        fi
+    fi
+
+    IFS="$TMP_IFS"
+done
+
+# ---- Finished
+exit 0

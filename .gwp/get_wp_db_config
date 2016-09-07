@@ -1,0 +1,68 @@
+#!/bin/bash
+
+###### Dependencies ######
+##########################
+# ---- Global Variables
+# DB_NAME
+# WP_DB_USER
+# WP_DB_PASS
+# 
+# ---- External Functions
+# error_exit
+##########################
+
+get_wp_db_config() {
+
+    #    -----------------------------------------------------------------
+    #    Function gets DB config from wp-config.php file provided as the
+    #    first argument & saves in the following Global vars:
+    #    DB_NAME
+    #    WP_DB_USER
+    #    WP_DB_PASS
+    #    
+    #    =================================================================
+    #    @usage
+    #    get_wp_db_config $wp_config_path
+    #    -----------------------------------------------------------------
+
+    TMP_IFS="$IFS"
+    # define IFS for wp-config.php variable extraction
+    IFS=' "'"'"$'\t'
+    
+    local def=""
+    local const=""
+    local comma=""
+    local val=""
+    local end=""
+    local line=""
+    wp_config="$1"
+    if [[ ! -f "$wp_config" ]]; then
+        error_exit "$LINENO: Error, wp config [file=$wp_config] is not a valid file!"
+    fi
+    # all DB defines in wp-config
+    local DB_defines=$( cat "$wp_config" | grep '^[ \t]*define[ \t]*([ \t]*["'"']DB_" )
+    
+    # @todo instead of perseing DB_NAME, WP_DB_USER etc. separately, use a function, since they are very similar CDOE
+    #       a simple function with different parameter passing will do!
+    # 
+    # DB_NAME line from defines lines
+    line=$( grep '\<DB_NAME\>' <<< "$DB_defines" )
+    # get values
+    read -r def const comma val end <<< "$line"
+    DB_NAME="$val"
+
+    # WP_DB_USER line from defines lines
+    line=$( grep '\<DB_USER\>' <<< "$DB_defines" )
+    # get values
+    read -r def const comma val end <<< "$line"
+    WP_DB_USER="$val"
+
+    # WP_DB_PASS line from defines lines
+    line=$( grep '\<DB_PASSWORD\>' <<< "$DB_defines" )
+    # get values
+    read -r def const comma val end <<< "$line"
+    WP_DB_PASS="$val"
+
+    # redefine IFS back to the last value
+    IFS="$TMP_IFS"
+}

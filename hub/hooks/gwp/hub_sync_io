@@ -1,0 +1,222 @@
+#!/bin/bash
+
+###### Dependencies ######
+##########################
+# ---- Global Variables
+# DB_NAME
+# WP_DB_USER
+# WP_DB_PASS
+# WP_CONFIG
+# 
+# CUR_TIME
+# 
+# CUR_REPO
+# HUB_REPO
+# LIVE_REPO
+# 
+# ACTIVE_BRANCH
+# PULL_BRANCH
+# PUSH_BRANCH
+# PRE_SYNC_BRANCH
+# 
+# SYNC_LOG_PATH
+# SYNC_LOG_FILE
+# 
+# ---- External Functions
+# error_exit
+# response
+# get_wp_db_config
+# dump_db
+# replace_db
+# 
+# ---- External commands
+# git
+# 
+##########################
+
+hub_sync_io() {
+
+    #   ----------------------------------------------------------------
+    #   Function corresponds to dev_sync_io
+    #       syncs in  updates from LIVE to HUB  repo
+    #       syncs out updates from HUB  to LIVE repo
+    #   ================================================================
+    #   @usage:
+    #   hub_sync_io "$io" "${WITH_DB}" "${WITH_UPLOADS}" "${DEV_REPO}"
+    # 
+    #   SYNC commit message format:
+    #   --------------------------------------------------------------------
+    #   SYNC IN cycle
+    #   [GWP] PRE SYNC|IN|+/-DB|+/-UPLOADS @TIME XXXX-XX-XX XX:XX GMT (dev)
+    #   [GWP] <<< SYNC|IN|+/-DB|+/-UPLOADS @TIME XXXX-XX-XX XX:XX GMT (live)
+    #   [GWP] >>> SYNC|IN|+/-DB|+/-UPLOADS @TIME XXXX-XX-XX XX:XX GMT (dev)     -> if there is a merge
+    #   
+    #   SYNC OUT cycle
+    #   [GWP] <<< SYNC|OUT|+/-DB|+/-UPLOADS @TIME XXXX-XX-XX XX:XX GMT (dev)
+    #   [GWP] PRE SYNC|OUT|+/-DB|+/-UPLOADS @TIME XXXX-XX-XX XX:XX GMT (live)
+    #   [GWP] >>> SYNC|OUT|+/-DB|+/-UPLOADS @TIME XXXX-XX-XX XX:XX GMT (live)   -> if there is a merge
+    #   [GWP] === SYNC|OUT|+/-DB|+/-UPLOADS @TIME XXXX-XX-XX XX:XX GMT (dev)    -> if there is a merge
+    # 
+    #   SIGN Defn:
+    #   <<< SYNC ... (dev)  = going out of dev
+    #   >>> SYNC ... (live) = coming into live
+    #   === SYNC ... (dev)  = balancing the final changes (only in dev)
+    #   
+    #   Commit message extration method:
+    #   IFS=' |'
+    #   read -r sign sync_kw io db up time_repo <<< "$COMMIT_MESSAGE"
+    #   --------------------------------------------------------------------
+
+
+    # IN or OUT
+    local io=$1
+    local with_db=$2
+    local with_uploads=$3
+    # we must know which dev repo we are updating from
+    DEV_REPO=$4
+    # signs
+    local sign_gwp="[GWP]"
+    local sign_pre="PRE"
+    local sign_in="<<<"
+    local sign_out=">>>"
+    local sync_kw="SYNC"
+    # options
+    local db="DB"
+    local up="UPLOADS"
+
+    # msg common
+    local msg="$sync_kw|$io"
+    # msg specific case
+    local msg_add="$sign_gwp"
+    local msg_pull="$sign_gwp"
+
+
+    if [[ "IN" == "$io" ]]; then
+        msg_add="$msg_add $sign_in"
+    elif [[ "OUT" == "$io" ]]; then
+        msg_add="$msg_add $sign_pre"
+        msg_pull="$msg_pull $sign_out"
+    else
+        error_exit "$LINENO: Unknown io: [$io]"
+    fi
+
+    if [[ -z "$DEV_REPO" ]]; then
+        error_exit "$LINENO: Empty Dev Repo"
+    elif [[ "hub" == "$DEV_REPO" || "live" == "$DEV_REPO" ]]; then
+        error_exit "$LINENO: Error: you must not name your Dev Repo: [$DEV_REPO]"
+    fi
+
+    local TMP_PWD="$PWD"
+    cd "$REPO_PATH"
+
+    if [[ $? -ne 0 ]]; then
+        error_exit "$LINENO: Failed cd to production: $REPO_PATH! Please fix the issue & try again!"
+    fi
+
+    # unsetting this git Environment variable is necessary after cd to another repo
+    unset GIT_DIR
+
+    local TMP_CUR_BRANCH="$CUR_BRANCH"
+    CUR_BRANCH=$(git symbolic-ref --short HEAD)
+
+    # must be checked out in $ACTIVE_BRANCH branch
+    if [[ "$CUR_BRANCH" != "$ACTIVE_BRANCH" ]]; then
+        error_exit "$LINENO: You can only Sync in/out from the ${CUR_REPO}/${ACTIVE_BRANCH} Branch!"
+    fi
+
+    if [[ "true" == "$with_db" ]]; then
+        msg="${msg}|+${db}"
+
+        if [[ -z "$DB_NAME" || -z "$WP_DB_USER" || -z "$WP_DB_PASS" ]]; then
+            get_wp_db_config "$WP_CONFIG"
+        fi
+
+        if [[ ! -d "$DB_PATH" ]]; then
+            mkdir -p "$DB_PATH"
+        fi
+        local live_dump_file="${DB_PATH}/${CUR_REPO}.sql"
+        echo " "
+        echo "**** Dumping ${CUR_REPO} Database to [file=$live_dump_file]"
+        dump_db "$DB_NAME" "$WP_DB_USER" "$WP_DB_PASS" "$live_dump_file"
+    else
+        msg="${msg}|-${db}"
+    fi
+
+    if [[ "true" == "$with_uploads" ]]; then
+        # @todo: commit uploads?
+        msg="${msg}|+${up}"
+    else
+        msg="${msg}|-${up}"
+    fi
+
+    msg="${msg} ${CUR_TIME} (${CUR_REPO})"
+
+    # create sync log dir if not exists
+    if [[ ! -d "$SYNC_LOG_PATH" ]]; then
+        mkdir "$SYNC_LOG_PATH"
+        if [[ $? -ne 0 ]]; then
+            error_exit "$LINENO: Failed to create sync log dir [$SYNC_LOG_PATH]. Aborting program"
+        fi
+    fi
+
+    # Adding sync log
+    msg_add="$msg_add $msg"
+    echo "$msg_add" >> "${SYNC_LOG_FILE}"
+
+    # Adding everything
+    git add -A
+    if [[ $? -ne 0 ]]; then
+        # git add returns 0 even if there is nothing to add, so non-zero return means there must have been an error
+        error_exit "$LINENO: Failed to add files in ${CUR_REPO}/${ACTIVE_BRANCH}! Please check error messages and take actions accordingly."
+    fi
+
+    git commit -m "$msg_add"
+    if [[ $? -ne 0 ]]; then
+        error_exit "$LINENO: Failed to commit ${CUR_REPO}/${ACTIVE_BRANCH}! Please try manually."
+    fi
+
+    if [[ "OUT" == "$io" ]]; then
+        # push to temp pre-synk branch
+        git push $HUB_REPO $ACTIVE_BRANCH:$PRE_SYNC_BRANCH
+        if [[ $? -ne 0 ]]; then
+            error_exit "$LINENO: Failed to push ${CUR_REPO}/${ACTIVE_BRANCH} to ${HUB_REPO}/${PRE_SYNC_BRANCH}! Please check error messages and take actions accordingly."
+        fi
+
+        # pull from hub/master
+        msg_pull="$msg_pull $msg"
+        git fetch $HUB_REPO $PULL_BRANCH
+        git merge -m "$msg_pull" FETCH_HEAD
+        if [[ $? -ne 0 ]]; then
+            # must be an error if something happened to pull from live server!
+            error_exit "$LINENO: Failed to pull from ${HUB_REPO}/${PULL_BRANCH} in ${CUR_REPO}/${ACTIVE_BRANCH}! Please check error messages and take actions accordingly. *** LIVE SERVER MAY NEED CHECKING ***"
+        fi
+
+        if [[ "true" == "$with_db" ]]; then
+            # replace live DB with new dev DB
+            if [[ ! -d "$DB_PATH" ]]; then
+                mkdir -p "$DB_PATH"
+            fi
+            local dev_dump_file="${DB_PATH}/${DEV_REPO}.sql"
+            echo " "
+            echo "**** Replacing [${CUR_REPO}] Database with version from [${DEV_REPO}] .. ."
+            replace_db "$DB_NAME" "$WP_DB_USER" "$WP_DB_PASS" "$dev_dump_file"
+        fi
+
+        # if [[ "true" == "$with_uploads" ]]; then
+            # @todo: pull uploads
+        # fi
+    fi
+
+    git push $HUB_REPO $ACTIVE_BRANCH:$PUSH_BRANCH
+    if [ $? -ne 0 ]; then
+        # instead of error, warning here, since we still want to pull hub/production from dev
+        warn "$LINENO: Failed to push to ${HUB_REPO}/${PUSH_BRANCH} from ${CUR_REPO}/${ACTIVE_BRANCH}! Please check error messages and take actions accordingly."
+    fi
+    
+    # $PWD etc. changed, so changing back again
+    cd "$TMP_PWD"
+    # @todo Check: is $PWD change back needed at all?
+    PWD="$TMP_PWD"
+    unset GIT_DIR
+    CUR_BRANCH="$TMP_CUR_BRANCH"
+}

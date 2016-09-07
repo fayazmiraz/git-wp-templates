@@ -1,0 +1,6 @@
+# defining REPO_PATH is must, otherwise the scripts will not work
+# REPO_PATH is path to your live repository.
+# Usually it's the directory that has the WordPress installation or web root
+REPO_PATH=
+
+# no other config variable needs intialization here, but you may if you need

@@ -1,0 +1,64 @@
+#!/bin/bash
+
+# get options from the original command
+UPDATE_OPTIONS="$@"
+
+# Dir to Local config files
+LOCAL_CONFIG_DIR="gwp.d"
+
+update_hooks() {
+
+    #   ----------------------------------------------------------------------------
+    #   copy files from source to destination and make copied files executable
+    #   options are similar to cp command
+    #   @usage:
+    #   update_hooks -iv src_dir dest_dir [chmode option]
+    #   
+    #   @todo: Currently src_dir, dest_dir param shouldn't have any trailing slash.
+    #          Later handle trailing slash within the function.
+    #   ============================================================================
+    #   
+    #   ----------------------------------------------------------------------------
+    
+    local src="$1"
+    local dest="$2"
+    local fmod="$3"
+    local resource=""
+
+    local readme="README.md"
+
+    if [[ -z "$fmod" || "true" == "$fmode" ]]; then
+        fmod="u+x"
+    fi
+
+    for resource in "$src"/*
+    do
+        if [[ -f "$resource" ]]; then
+            # processing files
+            local file_name=$( basename "$resource" )
+            cp $UPDATE_OPTIONS "$resource" "$dest"
+            if [[ "$readme" != "$file_name" ]]; then
+                # now make it executable
+                local dest_file="${dest}/${file_name}"
+                if [[ $? -eq 0 && -f "$dest_file" && "false" != "$fmode" ]]; then
+                    chmod $fmod "$dest_file"
+                fi
+            fi
+        elif [[ -d "$resource" ]]; then
+            # processing directories
+            local dir_name=$( basename "$resource" )
+            # create the directory in dest. if it doesn't exist
+            local dest_dir="${dest}/${dir_name}"
+            if [[ ! -d "$dest_dir" ]]; then
+                $( cd "$dest" && mkdir "$dir_name" )
+                if [[ $? -ne 0 ]]; then
+                    error_exit "$LINENO: Problem with destination directory. Please check error messages and take actions accordingly"
+                fi
+            fi
+            # update all dir except LOCAL_CONFIG_DIR
+            if [[ "$LOCAL_CONFIG_DIR" != "$dir_name" ]]; then
+                update_hooks "$resource" "$dest_dir" "$fmod"
+            fi
+        fi
+    done
+}

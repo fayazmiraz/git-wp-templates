@@ -1,0 +1,44 @@
+#!/bin/bash
+
+response() {
+    #   ----------------------------------------------------------------
+    #   yes / no response from stdin, returns string true|false
+    #   @usage:
+    #   => default is 'N', message gets the auto suffix: "(Y/n - default N)"
+    #   input=$( response "message" )
+    #   => default set to 'Y'
+    #   input=$( response "message" "Y" )
+    #   => default set to 'N'
+    #   input=$( response "message" "N" )
+    #   ----------------------------------------------------------------
+    local tf="false"
+    local input='N'
+
+    local msg="${1}"
+    local default="${2}"
+    if [[ "${default}" == "" ]]; then
+        default='N'
+        msg="${msg} (Y/n - default N)"
+    fi
+
+
+    exec < /dev/tty
+    while true; do
+        read -p "${msg} " input
+        if [[ "${input}" == "" ]]; then
+            input="${default}"
+        fi
+        case $input in
+            [Yy] )
+                tf="true"
+                break;;
+            [Nn] )
+                tf="false"
+                break;;
+            * )
+                echo "Wrong Input! Type y for Yes OR n for No." 1>&2
+                ;;
+        esac
+    done
+    echo $tf
+}
